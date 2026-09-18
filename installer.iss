@@ -1,5 +1,5 @@
 #define MyAppName "Extreme Message Animator"
-#define MyAppVersion "2.1.0"
+#define MyAppVersion "3.0.0"
 #define MyAppPublisher "Extreme Message Animator"
 #define MyAppExeName "ExtremeMessageAnimator.exe"
 
@@ -24,15 +24,27 @@ WizardStyle=classic
 
 DisableProgramGroupPage=yes
 
-UninstallDisplayIcon={app}\{#MyAppExeName}
-
 PrivilegesRequired=admin
+
+UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Files]
 
 Source: "dist\ExtremeMessageAnimator.exe"; \
     DestDir: "{app}"; \
     Flags: ignoreversion
+
+Source: "dist\ucrtbase.dll"; \
+    DestDir: "{app}"; \
+    Flags: ignoreversion skipifsourcedoesntexist
+
+Source: "dist\vcruntime140.dll"; \
+    DestDir: "{app}"; \
+    Flags: ignoreversion skipifsourcedoesntexist
+
+Source: "dist\vcruntime140_1.dll"; \
+    DestDir: "{app}"; \
+    Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 
