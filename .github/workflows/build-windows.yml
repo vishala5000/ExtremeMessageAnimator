@@ -12,6 +12,7 @@ jobs:
     runs-on: windows-2022
 
     steps:
+
       # ============================================================
       # CHECKOUT
       # ============================================================
@@ -20,7 +21,6 @@ jobs:
 
       # ============================================================
       # PYTHON 3.8.10
-      # Windows 7 compatible target
       # ============================================================
       - name: Setup Python 3.8.10
         uses: actions/setup-python@v5
@@ -30,7 +30,7 @@ jobs:
           cache: pip
 
       # ============================================================
-      # SHOW ENVIRONMENT
+      # SHOW BUILD ENVIRONMENT
       # ============================================================
       - name: Show build environment
         shell: powershell
@@ -42,27 +42,37 @@ jobs:
           Write-Host "=========================================="
 
           python --version
-          python -c "import platform; print(platform.platform()); print(platform.machine())"
+          python -c "import platform; print('Platform:', platform.platform()); print('Machine:', platform.machine())"
 
           Write-Host ""
-          Write-Host "Python location:"
+          Write-Host "Python:"
           where.exe python
 
           Write-Host ""
-          Write-Host "PowerShell:"
-          $PSVersionTable.PSVersion
+          Write-Host "Python location:"
+          Write-Host $env:pythonLocation
 
       # ============================================================
-      # INSTALL PYTHON BUILD TOOLS
+      # INSTALL PYTHON DEPENDENCIES
       # ============================================================
       - name: Install Python dependencies
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
+          Write-Host "=========================================="
+          Write-Host "INSTALLING PYTHON DEPENDENCIES"
+          Write-Host "=========================================="
+
           python -m pip install --upgrade "pip<24.1"
-          python -m pip install --no-cache-dir pygame==2.1.3
-          python -m pip install --no-cache-dir pyinstaller==5.13.2
+
+          python -m pip install `
+            --no-cache-dir `
+            pygame==2.1.3
+
+          python -m pip install `
+            --no-cache-dir `
+            pyinstaller==5.13.2
 
       # ============================================================
       # VERIFY PYGAME
@@ -72,7 +82,12 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          python -c "import pygame; print('Pygame:', pygame.version.ver)"
+          Write-Host "=========================================="
+          Write-Host "VERIFYING PYGAME"
+          Write-Host "=========================================="
+
+          python -c "import pygame; print('Pygame version:', pygame.version.ver)"
+
           python -c "import pygame; pygame.init(); print('Pygame initialized successfully'); pygame.quit()"
 
       # ============================================================
@@ -83,49 +98,83 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
+          Write-Host "=========================================="
+          Write-Host "VERIFYING PYINSTALLER"
+          Write-Host "=========================================="
+
           python -m PyInstaller --version
 
       # ============================================================
-      # CLEAN OLD BUILD FILES
+      # VERIFY SOURCE FILES
+      # ============================================================
+      - name: Verify project files
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $requiredFiles = @(
+            "app.py",
+            "requirements.txt",
+            "ExtremeMessageAnimator.spec",
+            "installer.iss"
+          )
+
+          foreach ($file in $requiredFiles) {
+
+            if (-not (Test-Path $file)) {
+              throw "Required file not found: $file"
+            }
+
+            Write-Host "FOUND: $file"
+          }
+
+          Write-Host ""
+          Write-Host "All required project files found."
+
+      # ============================================================
+      # CLEAN BUILD DIRECTORIES
       # ============================================================
       - name: Clean build directories
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
+          Write-Host "=========================================="
+          Write-Host "CLEANING BUILD DIRECTORIES"
+          Write-Host "=========================================="
+
           $folders = @(
             "build",
             "dist",
             "installer",
+            "portable",
             "Output"
           )
 
           foreach ($folder in $folders) {
+
             if (Test-Path $folder) {
-              Remove-Item $folder -Recurse -Force
+              Remove-Item `
+                $folder `
+                -Recurse `
+                -Force
+
+              Write-Host "Removed: $folder"
             }
           }
 
-          Write-Host "Build directories cleaned."
+          Write-Host "Cleaning complete."
 
       # ============================================================
-      # BUILD EXE
+      # BUILD APPLICATION
       # ============================================================
       - name: Build application with PyInstaller
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          if (-not (Test-Path "app.py")) {
-            throw "app.py was not found."
-          }
-
-          if (-not (Test-Path "ExtremeMessageAnimator.spec")) {
-            throw "ExtremeMessageAnimator.spec was not found."
-          }
-
           Write-Host "=========================================="
-          Write-Host "BUILDING EXTREME MESSAGE ANIMATOR"
+          Write-Host "BUILDING APPLICATION"
           Write-Host "=========================================="
 
           python -m PyInstaller `
@@ -137,39 +186,53 @@ jobs:
             throw "PyInstaller build failed with exit code $LASTEXITCODE"
           }
 
+          Write-Host ""
+          Write-Host "PyInstaller build completed."
+
       # ============================================================
-      # CHECK EXE
+      # VERIFY APPLICATION EXE
       # ============================================================
-      - name: Verify EXE
+      - name: Verify application EXE
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
           $exe = "dist\ExtremeMessageAnimator.exe"
 
+          Write-Host "=========================================="
+          Write-Host "VERIFYING APPLICATION EXE"
+          Write-Host "=========================================="
+
           if (-not (Test-Path $exe)) {
             throw "ExtremeMessageAnimator.exe was not created."
           }
 
-          $size = (Get-Item $exe).Length
+          $file = Get-Item $exe
 
-          Write-Host "=========================================="
-          Write-Host "EXE CREATED"
-          Write-Host "=========================================="
-          Write-Host "Path: $exe"
-          Write-Host "Size: $size bytes"
+          Write-Host "EXE:"
+          Write-Host $file.FullName
 
-          if ($size -lt 1000000) {
-            Write-Warning "EXE is unusually small."
+          Write-Host "Size:"
+          Write-Host "$($file.Length) bytes"
+
+          if ($file.Length -lt 1000000) {
+            Write-Warning "The EXE is unusually small."
           }
 
+          Write-Host ""
+          Write-Host "Application EXE verified successfully."
+
       # ============================================================
-      # COPY WINDOWS RUNTIME DLLS
+      # ADD WINDOWS RUNTIME DLLS
       # ============================================================
       - name: Add Windows runtime DLLs
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
+
+          Write-Host "=========================================="
+          Write-Host "ADDING WINDOWS RUNTIME DLLS"
+          Write-Host "=========================================="
 
           $dist = Join-Path $PWD "dist"
 
@@ -177,13 +240,10 @@ jobs:
             throw "dist directory does not exist."
           }
 
-          Write-Host "=========================================="
-          Write-Host "ADDING WINDOWS RUNTIME FILES"
-          Write-Host "=========================================="
+          # --------------------------------------------------------
+          # Visual C++ Runtime DLLs
+          # --------------------------------------------------------
 
-          # --------------------------------------------------------
-          # Visual C++ Runtime
-          # --------------------------------------------------------
           $pythonRoot = $env:pythonLocation
 
           $runtimeFiles = @(
@@ -197,30 +257,39 @@ jobs:
             $destination = Join-Path $dist $file
 
             if (Test-Path $source) {
-              Copy-Item $source $destination -Force
-              Write-Host "Copied $file"
+
+              Copy-Item `
+                $source `
+                $destination `
+                -Force
+
+              Write-Host "Copied: $file"
             }
             else {
-              Write-Warning "$file not found at $source"
+              Write-Warning "Not found: $source"
             }
           }
 
           # --------------------------------------------------------
           # Universal CRT
           # --------------------------------------------------------
+
           $ucrtCandidates = @()
 
-          $windowsKits = @(
+          $windowsKitRoots = @(
             "${env:ProgramFiles(x86)}\Windows Kits\10\Redist",
             "${env:ProgramFiles}\Windows Kits\10\Redist"
           )
 
-          foreach ($kitRoot in $windowsKits) {
+          foreach ($root in $windowsKitRoots) {
 
-            if (Test-Path $kitRoot) {
+            if (Test-Path $root) {
+
+              Write-Host "Searching:"
+              Write-Host $root
 
               $found = Get-ChildItem `
-                -Path $kitRoot `
+                -Path $root `
                 -Filter "ucrtbase.dll" `
                 -File `
                 -Recurse `
@@ -239,7 +308,8 @@ jobs:
             Select-Object -First 1
 
           if (-not $ucrt) {
-            $ucrt = $ucrtCandidates | Select-Object -First 1
+            $ucrt = $ucrtCandidates |
+              Select-Object -First 1
           }
 
           if ($ucrt) {
@@ -249,7 +319,8 @@ jobs:
               (Join-Path $dist "ucrtbase.dll") `
               -Force
 
-            Write-Host "Copied ucrtbase.dll from:"
+            Write-Host ""
+            Write-Host "Copied ucrtbase.dll:"
             Write-Host $ucrt.FullName
           }
           else {
@@ -257,7 +328,8 @@ jobs:
           }
 
           Write-Host ""
-          Write-Host "Runtime files in dist:"
+          Write-Host "Runtime DLLs currently in dist:"
+
           Get-ChildItem $dist |
             Where-Object {
               $_.Name -match "^(ucrtbase|vcruntime).*\.dll$"
@@ -265,39 +337,36 @@ jobs:
             Select-Object Name, Length
 
       # ============================================================
-      # VERIFY RUNTIME FILES
+      # VERIFY WINDOWS RUNTIME DLLS
       # ============================================================
       - name: Verify Windows runtime files
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
+          Write-Host "=========================================="
+          Write-Host "VERIFYING WINDOWS RUNTIME FILES"
+          Write-Host "=========================================="
+
           $dist = "dist"
 
-          $required = @(
-            "ExtremeMessageAnimator.exe"
-          )
-
-          foreach ($file in $required) {
-            if (-not (Test-Path (Join-Path $dist $file))) {
-              throw "$file is missing."
-            }
+          if (-not (Test-Path "$dist\ExtremeMessageAnimator.exe")) {
+            throw "Application EXE is missing."
           }
 
-          Write-Host "Application files verified."
-
-          $runtime = @(
+          $runtimeFiles = @(
             "ucrtbase.dll",
             "vcruntime140.dll",
             "vcruntime140_1.dll"
           )
 
-          foreach ($file in $runtime) {
+          foreach ($file in $runtimeFiles) {
 
             $path = Join-Path $dist $file
 
             if (Test-Path $path) {
-              Write-Host "FOUND: $file"
+              $size = (Get-Item $path).Length
+              Write-Host "FOUND: $file ($size bytes)"
             }
             else {
               Write-Warning "NOT FOUND: $file"
@@ -305,11 +374,10 @@ jobs:
           }
 
       # ============================================================
-      # FIND PREINSTALLED INNO SETUP
+      # LOCATE PREINSTALLED INNO SETUP
       #
-      # IMPORTANT:
-      # GitHub's Windows runner already contains a newer
-      # Inno Setup version. Do NOT downgrade it with Chocolatey.
+      # DO NOT INSTALL / DOWNGRADE INNO SETUP.
+      # GitHub runner already contains Inno Setup 6.
       # ============================================================
       - name: Locate Inno Setup
         shell: powershell
@@ -335,8 +403,14 @@ jobs:
             }
           }
 
-          # Fallback: search Program Files
+          # --------------------------------------------------------
+          # Fallback search
+          # --------------------------------------------------------
+
           if (-not $iscc) {
+
+            Write-Host "Standard location not found."
+            Write-Host "Searching Program Files..."
 
             $searchRoots = @(
               $env:ProgramFiles,
@@ -349,36 +423,43 @@ jobs:
                 continue
               }
 
-              if (Test-Path $root) {
+              if (-not (Test-Path $root)) {
+                continue
+              }
 
-                $found = Get-ChildItem `
-                  -Path $root `
-                  -Filter "ISCC.exe" `
-                  -File `
-                  -Recurse `
-                  -ErrorAction SilentlyContinue |
-                  Select-Object -First 1
+              $found = Get-ChildItem `
+                -Path $root `
+                -Filter "ISCC.exe" `
+                -File `
+                -Recurse `
+                -ErrorAction SilentlyContinue |
+                Select-Object -First 1
 
-                if ($found) {
-                  $iscc = $found.FullName
-                  break
-                }
+              if ($found) {
+                $iscc = $found.FullName
+                break
               }
             }
           }
 
           if (-not $iscc) {
-            throw "Inno Setup ISCC.exe was not found on the GitHub runner."
+            throw "Inno Setup ISCC.exe was not found."
           }
 
-          Write-Host "Inno Setup compiler found:"
+          Write-Host ""
+          Write-Host "Inno Setup found:"
           Write-Host $iscc
 
-          # Save for later steps
+          # Make available to later workflow steps.
           "ISCC_PATH=$iscc" >> $env:GITHUB_ENV
 
       # ============================================================
-      # SHOW INNO SETUP VERSION
+      # VERIFY INNO SETUP
+      #
+      # IMPORTANT:
+      # DO NOT RUN "ISCC.EXE /?"
+      #
+      # ISCC displays help but returns exit code 1 for /?.
       # ============================================================
       - name: Verify Inno Setup
         shell: powershell
@@ -393,10 +474,21 @@ jobs:
             throw "ISCC.exe does not exist at $env:ISCC_PATH"
           }
 
-          Write-Host "Using:"
+          Write-Host "=========================================="
+          Write-Host "INNO SETUP FOUND"
+          Write-Host "=========================================="
+
+          Write-Host "Path:"
           Write-Host $env:ISCC_PATH
 
-          & $env:ISCC_PATH /?
+          $version = (Get-Item $env:ISCC_PATH).VersionInfo.ProductVersion
+
+          Write-Host ""
+          Write-Host "Version:"
+          Write-Host $version
+
+          Write-Host ""
+          Write-Host "Inno Setup verification successful."
 
       # ============================================================
       # BUILD INSTALLER
@@ -406,17 +498,31 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
+          Write-Host "=========================================="
+          Write-Host "BUILDING WINDOWS INSTALLER"
+          Write-Host "=========================================="
+
           if (-not $env:ISCC_PATH) {
             throw "ISCC_PATH is not available."
+          }
+
+          if (-not (Test-Path $env:ISCC_PATH)) {
+            throw "ISCC.exe was not found at $env:ISCC_PATH"
           }
 
           if (-not (Test-Path "installer.iss")) {
             throw "installer.iss was not found."
           }
 
-          Write-Host "=========================================="
-          Write-Host "BUILDING INSTALLER"
-          Write-Host "=========================================="
+          Write-Host "Compiler:"
+          Write-Host $env:ISCC_PATH
+
+          Write-Host ""
+          Write-Host "Installer script:"
+          Write-Host "$PWD\installer.iss"
+
+          Write-Host ""
+          Write-Host "Starting Inno Setup compilation..."
 
           & $env:ISCC_PATH "installer.iss"
 
@@ -424,8 +530,13 @@ jobs:
             throw "Inno Setup compilation failed with exit code $LASTEXITCODE"
           }
 
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "INNO SETUP BUILD SUCCESSFUL"
+          Write-Host "=========================================="
+
       # ============================================================
-      # FIND INSTALLER
+      # FIND AND VERIFY INSTALLER
       # ============================================================
       - name: Verify installer
         shell: powershell
@@ -433,19 +544,21 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           Write-Host "=========================================="
-          Write-Host "SEARCHING FOR INSTALLER"
+          Write-Host "VERIFYING INSTALLER"
           Write-Host "=========================================="
 
-          $installer = Get-ChildItem `
+          $installerFiles = Get-ChildItem `
             -Path $PWD `
             -Filter "*.exe" `
             -File `
             -Recurse |
             Where-Object {
-              $_.FullName -match "Setup"
+              $_.FullName -notmatch "\\dist\\" `
+              -and $_.FullName -match "Setup"
             } |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1
+            Sort-Object LastWriteTime -Descending
+
+          $installer = $installerFiles | Select-Object -First 1
 
           if (-not $installer) {
             throw "Installer EXE was not created."
@@ -458,21 +571,38 @@ jobs:
           Write-Host "Installer size:"
           Write-Host "$($installer.Length) bytes"
 
-          # Put installer into a predictable directory
-          New-Item -ItemType Directory -Force -Path "installer" | Out-Null
+          if ($installer.Length -lt 1000000) {
+            Write-Warning "Installer is unusually small."
+          }
+
+          # --------------------------------------------------------
+          # Create predictable installer directory
+          # --------------------------------------------------------
+
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path "installer" |
+            Out-Null
+
+          $finalInstaller = "installer\ExtremeMessageAnimator-Windows7-10-Setup.exe"
 
           Copy-Item `
             $installer.FullName `
-            "installer\ExtremeMessageAnimator-Windows7-10-Setup.exe" `
+            $finalInstaller `
             -Force
 
-          if (-not (Test-Path "installer\ExtremeMessageAnimator-Windows7-10-Setup.exe")) {
+          if (-not (Test-Path $finalInstaller)) {
             throw "Final installer copy failed."
           }
 
           Write-Host ""
+          Write-Host "Final installer:"
+          Write-Host "$PWD\$finalInstaller"
+
+          Write-Host ""
           Write-Host "=========================================="
-          Write-Host "INSTALLER READY"
+          Write-Host "INSTALLER VERIFIED"
           Write-Host "=========================================="
 
       # ============================================================
@@ -483,38 +613,52 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
+          Write-Host "=========================================="
+          Write-Host "CREATING PORTABLE PACKAGE"
+          Write-Host "=========================================="
+
           if (-not (Test-Path "dist\ExtremeMessageAnimator.exe")) {
-            throw "Portable EXE missing."
+            throw "Portable EXE is missing."
           }
 
-          New-Item -ItemType Directory -Force -Path "portable" | Out-Null
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path "portable" |
+            Out-Null
 
           Copy-Item `
             "dist\ExtremeMessageAnimator.exe" `
             "portable\ExtremeMessageAnimator.exe" `
             -Force
 
-          foreach ($dll in @(
+          $dlls = @(
             "ucrtbase.dll",
             "vcruntime140.dll",
             "vcruntime140_1.dll"
-          )) {
+          )
+
+          foreach ($dll in $dlls) {
 
             $source = "dist\$dll"
 
             if (Test-Path $source) {
+
               Copy-Item `
                 $source `
                 "portable\$dll" `
                 -Force
+
+              Write-Host "Copied: $dll"
             }
           }
 
-          Write-Host "Portable package:"
-          Get-ChildItem portable
+          Write-Host ""
+          Write-Host "Portable package contents:"
+          Get-ChildItem "portable"
 
       # ============================================================
-      # UPLOAD PORTABLE EXE
+      # UPLOAD PORTABLE PACKAGE
       # ============================================================
       - name: Upload portable application
         uses: actions/upload-artifact@v4
@@ -534,3 +678,23 @@ jobs:
           path: installer/ExtremeMessageAnimator-Windows7-10-Setup.exe
           if-no-files-found: error
           retention-days: 30
+
+      # ============================================================
+      # FINAL SUMMARY
+      # ============================================================
+      - name: Build summary
+        shell: powershell
+        run: |
+          Write-Host ""
+          Write-Host "=================================================="
+          Write-Host "           BUILD COMPLETED SUCCESSFULLY"
+          Write-Host "=================================================="
+          Write-Host ""
+          Write-Host "Portable:"
+          Write-Host "  ExtremeMessageAnimator-Portable-Windows7-10"
+          Write-Host ""
+          Write-Host "Installer:"
+          Write-Host "  ExtremeMessageAnimator-Setup-Windows7-10"
+          Write-Host ""
+          Write-Host "The GitHub Actions artifacts are ready."
+          Write-Host "=================================================="
