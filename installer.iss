@@ -10,7 +10,6 @@ AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 
 DefaultDirName={autopf}\Extreme Message Animator
-
 DefaultGroupName=Extreme Message Animator
 
 DisableProgramGroupPage=yes
@@ -29,8 +28,6 @@ ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 
 UninstallDisplayIcon={app}\{#MyAppExeName}
-
-SetupIconFile=
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
