@@ -7,49 +7,29 @@ pygame.init()
 pygame.font.init()
 
 APP_NAME = "Extreme Message Animator"
-
-# ---------------------------------------------------------
-# DISPLAY
-# ---------------------------------------------------------
+FPS = 60
+MAX_MESSAGE_LENGTH = 5000
 
 info = pygame.display.Info()
-WINDOW_WIDTH = info.current_w
-WINDOW_HEIGHT = info.current_h
-
-screen = pygame.display.set_mode(
-    (WINDOW_WIDTH, WINDOW_HEIGHT),
-    pygame.FULLSCREEN | pygame.DOUBLEBUF
-)
+SCREEN_W = info.current_w
+SCREEN_H = info.current_h
 
 pygame.display.set_caption(APP_NAME)
 
-clock = pygame.time.Clock()
+FONT_PATH = pygame.font.match_font("arial") or pygame.font.get_default_font()
 
-# ---------------------------------------------------------
-# COLORS
-# ---------------------------------------------------------
+clock = pygame.time.Clock()
 
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 
-# ---------------------------------------------------------
-# FONT
-# ---------------------------------------------------------
 
-FONT_PATH = pygame.font.match_font("arial")
-
-if FONT_PATH:
-    BASE_FONT = FONT_PATH
-else:
-    BASE_FONT = None
-
-
-# ---------------------------------------------------------
-# HSV COLOR
-# ---------------------------------------------------------
+# =========================================================
+# COLOR
+# =========================================================
 
 def hsv_to_rgb(h, s=1.0, v=1.0):
-    h = h % 360.0
+    h %= 360.0
 
     c = v * s
     x = c * (1 - abs((h / 60.0) % 2 - 1))
@@ -71,17 +51,20 @@ def hsv_to_rgb(h, s=1.0, v=1.0):
     return (
         int((r + m) * 255),
         int((g + m) * 255),
-        int((b + m) * 255)
+        int((b + m) * 255),
     )
 
 
-# ---------------------------------------------------------
-# TEXT WRAPPING
-# ---------------------------------------------------------
+# =========================================================
+# HELPERS
+# =========================================================
+
+def clamp(value, minimum, maximum):
+    return max(minimum, min(maximum, value))
+
 
 def wrap_text(text, font, max_width):
     words = text.split()
-
     if not words:
         return [""]
 
@@ -89,296 +72,446 @@ def wrap_text(text, font, max_width):
     current = words[0]
 
     for word in words[1:]:
-        test = current + " " + word
+        candidate = current + " " + word
 
-        if font.size(test)[0] <= max_width:
-            current = test
+        if font.size(candidate)[0] <= max_width:
+            current = candidate
         else:
             lines.append(current)
             current = word
 
     lines.append(current)
-
     return lines
 
 
-# ---------------------------------------------------------
+def ease_out_back(x):
+    c1 = 1.70158
+    c3 = c1 + 1
+    return 1 + c3 * (x - 1) ** 3 + c1 * (x - 1) ** 2
+
+
+def ease_in_out(x):
+    x = clamp(x, 0.0, 1.0)
+    return x * x * (3.0 - 2.0 * x)
+
+
+# =========================================================
 # PARTICLES
-# ---------------------------------------------------------
+# =========================================================
 
 class Particle:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self.reset(random.uniform(0, 1))
 
-    def __init__(self):
-        self.reset()
+    def reset(self, depth=None):
+        self.x = random.uniform(-self.width * 0.2, self.width * 1.2)
+        self.y = random.uniform(-self.height * 0.2, self.height * 1.2)
 
-    def reset(self):
-        self.x = random.uniform(0, WINDOW_WIDTH)
-        self.y = random.uniform(0, WINDOW_HEIGHT)
+        self.depth = (
+            random.uniform(0.15, 1.0)
+            if depth is None
+            else depth
+        )
 
-        angle = random.uniform(0, math.tau)
-        speed = random.uniform(0.3, 2.5)
-
-        self.vx = math.cos(angle) * speed
-        self.vy = math.sin(angle) * speed
-
-        self.radius = random.uniform(1.0, 4.0)
-
+        self.speed = random.uniform(0.3, 2.2)
+        self.size = random.uniform(1.0, 4.5)
         self.hue = random.uniform(0, 360)
+        self.alpha = random.randint(80, 230)
 
-        self.alpha = random.randint(70, 220)
+    def update(self, dt, speed_multiplier):
+        cx = self.width * 0.5
+        cy = self.height * 0.5
 
-    def update(self, dt):
-        self.x += self.vx * dt * 60
-        self.y += self.vy * dt * 60
+        dx = self.x - cx
+        dy = self.y - cy
 
-        self.hue += dt * 35
+        self.x += dx * self.depth * self.speed * dt * 0.12
+        self.y += dy * self.depth * self.speed * dt * 0.12
+
+        self.depth += (
+            dt * 0.10 * speed_multiplier * self.speed
+        )
+
+        self.hue += dt * 55
 
         if (
-            self.x < -20
-            or self.x > WINDOW_WIDTH + 20
-            or self.y < -20
-            or self.y > WINDOW_HEIGHT + 20
+            self.x < -self.width * 0.4
+            or self.x > self.width * 1.4
+            or self.y < -self.height * 0.4
+            or self.y > self.height * 1.4
+            or self.depth > 1.8
         ):
-            self.reset()
+            self.reset(0.15)
 
     def draw(self, surface):
-        color = hsv_to_rgb(self.hue, 1, 1)
-
-        glow = pygame.Surface(
-            (int(self.radius * 8), int(self.radius * 8)),
-            pygame.SRCALPHA
+        size = max(
+            1,
+            int(self.size * (0.5 + self.depth * 1.7))
         )
 
-        center = glow.get_width() // 2
-
-        pygame.draw.circle(
-            glow,
-            (*color, 25),
-            (center, center),
-            int(self.radius * 4)
+        color = hsv_to_rgb(
+            self.hue,
+            0.9,
+            1.0
         )
 
         pygame.draw.circle(
-            glow,
-            (*color, self.alpha),
-            (center, center),
-            max(1, int(self.radius))
-        )
-
-        surface.blit(
-            glow,
-            (
-                int(self.x - center),
-                int(self.y - center)
-            )
+            surface,
+            color,
+            (int(self.x), int(self.y)),
+            size
         )
 
 
-particles = [
-    Particle()
-    for _ in range(220)
-]
-
-
-# ---------------------------------------------------------
+# =========================================================
 # LIGHT STREAKS
-# ---------------------------------------------------------
+# =========================================================
 
-class Streak:
-
-    def __init__(self):
+class LightStreak:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
         self.reset()
 
     def reset(self):
-        self.x = random.uniform(-WINDOW_WIDTH, WINDOW_WIDTH)
-        self.y = random.uniform(0, WINDOW_HEIGHT)
+        self.x = random.uniform(
+            -self.width,
+            self.width
+        )
 
-        self.length = random.uniform(80, 400)
-        self.speed = random.uniform(5, 18)
+        self.y = random.uniform(
+            0,
+            self.height
+        )
+
+        self.length = random.uniform(
+            self.width * 0.04,
+            self.width * 0.30
+        )
+
+        self.speed = random.uniform(
+            self.width * 0.25,
+            self.width * 0.9
+        )
 
         self.hue = random.uniform(0, 360)
 
-        self.angle = random.uniform(-0.15, 0.15)
+        self.angle = random.uniform(
+            -0.08,
+            0.08
+        )
 
-    def update(self, dt):
-        self.x += self.speed * dt * 60
+    def update(self, dt, speed_multiplier):
+        self.x += (
+            self.speed
+            * dt
+            * speed_multiplier
+        )
 
-        self.hue += dt * 40
+        self.hue += dt * 45
 
-        if self.x > WINDOW_WIDTH + self.length:
+        if self.x > self.width + self.length:
             self.reset()
             self.x = -self.length
 
     def draw(self, surface):
-        color = hsv_to_rgb(self.hue, 1, 1)
+        color = hsv_to_rgb(
+            self.hue,
+            0.95,
+            1
+        )
 
         dx = math.cos(self.angle) * self.length
         dy = math.sin(self.angle) * self.length
 
-        start = (
-            int(self.x),
-            int(self.y)
-        )
-
-        end = (
-            int(self.x - dx),
-            int(self.y - dy)
-        )
-
         pygame.draw.line(
             surface,
             color,
+            (int(self.x), int(self.y)),
+            (
+                int(self.x - dx),
+                int(self.y - dy)
+            ),
+            2
+        )
+
+
+# =========================================================
+# BURST PARTICLES
+# =========================================================
+
+class Burst:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self.x = width * 0.5
+        self.y = height * 0.5
+        self.particles = []
+
+        for _ in range(140):
+            angle = random.uniform(0, math.tau)
+            speed = random.uniform(150, 900)
+
+            self.particles.append({
+                "x": self.x,
+                "y": self.y,
+                "vx": math.cos(angle) * speed,
+                "vy": math.sin(angle) * speed,
+                "life": random.uniform(0.5, 1.8),
+                "maxlife": 1.8,
+                "size": random.uniform(1, 5),
+                "hue": random.uniform(0, 360),
+            })
+
+    def update(self, dt):
+        alive = False
+
+        for p in self.particles:
+            if p["life"] > 0:
+                alive = True
+
+                p["x"] += p["vx"] * dt
+                p["y"] += p["vy"] * dt
+
+                p["vx"] *= 0.985
+                p["vy"] *= 0.985
+
+                p["life"] -= dt
+
+        return alive
+
+    def draw(self, surface):
+        for p in self.particles:
+            if p["life"] <= 0:
+                continue
+
+            alpha = int(
+                clamp(
+                    p["life"] / p["maxlife"],
+                    0,
+                    1
+                ) * 255
+            )
+
+            color = hsv_to_rgb(
+                p["hue"],
+                1,
+                1
+            )
+
+            pygame.draw.circle(
+                surface,
+                color,
+                (
+                    int(p["x"]),
+                    int(p["y"])
+                ),
+                max(
+                    1,
+                    int(p["size"])
+                )
+            )
+
+
+# =========================================================
+# ENERGY RINGS
+# =========================================================
+
+def draw_energy_rings(surface, t, intensity):
+    cx = SCREEN_W * 0.5
+    cy = SCREEN_H * 0.5
+
+    base = min(
+        SCREEN_W,
+        SCREEN_H
+    )
+
+    for i in range(12):
+        phase = (
+            t * (0.5 + i * 0.035)
+            + i * 0.8
+        )
+
+        radius = (
+            base * (0.10 + i * 0.045)
+            + math.sin(phase) * 12
+        )
+
+        radius *= intensity
+
+        rect = pygame.Rect(
+            int(cx - radius),
+            int(cy - radius),
+            int(radius * 2),
+            int(radius * 2)
+        )
+
+        color = hsv_to_rgb(
+            t * 55 + i * 30,
+            0.95,
+            0.8
+        )
+
+        start = phase
+        end = phase + math.pi * (
+            0.8 + 0.5 * math.sin(phase * 0.7)
+        )
+
+        pygame.draw.arc(
+            surface,
+            color,
+            rect,
             start,
             end,
             2
         )
 
 
-streaks = [
-    Streak()
-    for _ in range(28)
-]
+# =========================================================
+# TEXT RENDERING
+# =========================================================
 
-
-# ---------------------------------------------------------
-# ENERGY RINGS
-# ---------------------------------------------------------
-
-def draw_energy_rings(surface, t):
-
-    cx = WINDOW_WIDTH // 2
-    cy = WINDOW_HEIGHT // 2
-
-    max_radius = min(WINDOW_WIDTH, WINDOW_HEIGHT) * 0.48
-
-    for i in range(9):
-
-        phase = t * (0.7 + i * 0.04) + i
-
-        radius = (
-            max_radius * (0.25 + i * 0.085)
-            + math.sin(phase) * 15
-        )
-
-        hue = t * 55 + i * 40
-
-        color = hsv_to_rgb(
-            hue,
-            1,
-            1
-        )
-
-        rect = pygame.Rect(
-            cx - radius,
-            cy - radius,
-            radius * 2,
-            radius * 2
-        )
-
-        start_angle = phase
-        end_angle = phase + math.pi * 1.5
-
-        pygame.draw.arc(
-            surface,
-            color,
-            rect,
-            start_angle,
-            end_angle,
-            2
-        )
-
-
-# ---------------------------------------------------------
-# GLOW TEXT
-# ---------------------------------------------------------
-
-def draw_glowing_text(
-    surface,
+def render_text_lines(
     text,
-    center,
     font_size,
-    hue,
-    pulse,
-    angle
+    max_width
 ):
-
-    # Pulse
-    scale = 1.0 + math.sin(pulse) * 0.035
-
-    actual_size = max(
-        20,
-        int(font_size * scale)
-    )
+    font_size = int(font_size)
 
     font = pygame.font.Font(
-        BASE_FONT,
-        actual_size
+        FONT_PATH,
+        max(20, font_size)
     )
 
     lines = wrap_text(
         text,
         font,
-        int(WINDOW_WIDTH * 0.82)
+        max_width
     )
 
-    # Reduce size for long messages
-    while len(lines) > 8 and actual_size > 30:
-
-        actual_size -= 4
+    while (
+        len(lines) > 8
+        and font_size > 24
+    ):
+        font_size -= 4
 
         font = pygame.font.Font(
-            BASE_FONT,
-            actual_size
+            FONT_PATH,
+            font_size
         )
 
         lines = wrap_text(
             text,
             font,
-            int(WINDOW_WIDTH * 0.82)
+            max_width
         )
 
-    color = hsv_to_rgb(
-        hue,
-        0.95,
-        1
+    return font, lines
+
+
+def draw_text_with_glow(
+    surface,
+    text,
+    center_x,
+    center_y,
+    font_size,
+    hue,
+    scale,
+    rotation,
+    wave_time
+):
+
+    max_width = int(
+        SCREEN_W * 0.82
+    )
+
+    font, lines = render_text_lines(
+        text,
+        font_size,
+        max_width
     )
 
     line_height = font.get_linesize()
 
-    total_height = len(lines) * line_height
-
-    y = center[1] - total_height / 2
-
-    # Create large transparent glow surface
-    glow_surface = pygame.Surface(
-        (WINDOW_WIDTH, WINDOW_HEIGHT),
-        pygame.SRCALPHA
+    total_height = (
+        len(lines) * line_height
     )
 
-    for line in lines:
+    top = center_y - total_height / 2
 
-        text_surface = font.render(
+    # Individual-line rendering
+    for line_index, line in enumerate(lines):
+
+        line_surface = font.render(
             line,
             True,
-            color
+            hsv_to_rgb(
+                hue + line_index * 24,
+                1,
+                1
+            )
         )
 
-        rect = text_surface.get_rect(
-            center=(center[0], int(y + line_height / 2))
+        # Per-line movement
+        wave = math.sin(
+            wave_time * 2.0
+            + line_index * 0.7
+        ) * 8
+
+        # Individual letter-like energy effect
+        pulse = (
+            1
+            + math.sin(
+                wave_time * 3
+                + line_index
+            ) * 0.025
         )
 
-        # Multiple glow layers
-        for blur_size, alpha in [
-            (20, 18),
-            (12, 28),
-            (7, 45)
+        final_scale = (
+            scale
+            * pulse
+        )
+
+        if final_scale < 0.05:
+            final_scale = 0.05
+
+        transformed = pygame.transform.rotozoom(
+            line_surface,
+            rotation
+            + math.sin(
+                wave_time * 1.4
+                + line_index
+            ) * 0.8,
+            final_scale
+        )
+
+        rect = transformed.get_rect(
+            center=(
+                int(center_x),
+                int(
+                    top
+                    + line_index * line_height
+                    + line_height / 2
+                    + wave
+                )
+            )
+        )
+
+        # Glow layers
+        for extra, alpha in [
+            (36, 18),
+            (24, 28),
+            (14, 45),
+            (7, 75),
         ]:
 
             glow = pygame.transform.smoothscale(
-                text_surface,
+                transformed,
                 (
-                    text_surface.get_width() + blur_size,
-                    text_surface.get_height() + blur_size
+                    transformed.get_width() + extra,
+                    transformed.get_height() + extra
                 )
             )
 
@@ -388,97 +521,59 @@ def draw_glowing_text(
                 center=rect.center
             )
 
-            glow_surface.blit(
+            surface.blit(
                 glow,
                 glow_rect
             )
 
-        y += line_height
+        # Main text
+        surface.blit(
+            transformed,
+            rect
+        )
 
-    surface.blit(
-        glow_surface,
-        (0, 0)
+    return total_height
+
+
+# =========================================================
+# FULLSCREEN ANIMATION
+# =========================================================
+
+def animation_screen(message):
+
+    global SCREEN_W, SCREEN_H
+
+    pygame.display.set_mode(
+        (SCREEN_W, SCREEN_H),
+        pygame.FULLSCREEN
+        | pygame.DOUBLEBUF
     )
 
-    # Main text
-    y = center[1] - total_height / 2
+    particles = [
+        Particle(SCREEN_W, SCREEN_H)
+        for _ in range(260)
+    ]
 
-    for line in lines:
+    streaks = [
+        LightStreak(SCREEN_W, SCREEN_H)
+        for _ in range(40)
+    ]
 
-        text_surface = font.render(
-            line,
-            True,
-            color
-        )
+    bursts = []
 
-        rect = text_surface.get_rect(
-            center=(center[0], int(y + line_height / 2))
-        )
+    start_ticks = pygame.time.get_ticks()
 
-        rotated = pygame.transform.rotozoom(
-            text_surface,
-            angle,
-            1.0
-        )
+    paused = False
 
-        rotated_rect = rotated.get_rect(
-            center=rect.center
-        )
+    speed = 1.0
 
-        surface.blit(
-            rotated,
-            rotated_rect
-        )
-
-        y += line_height
-
-
-# ---------------------------------------------------------
-# FLASH EFFECT
-# ---------------------------------------------------------
-
-def draw_flash(surface, t):
-
-    pulse = (math.sin(t * 2.7) + 1) / 2
-
-    alpha = int(
-        max(0, (pulse - 0.94) * 800)
-    )
-
-    if alpha > 0:
-
-        overlay = pygame.Surface(
-            (WINDOW_WIDTH, WINDOW_HEIGHT),
-            pygame.SRCALPHA
-        )
-
-        overlay.fill(
-            (255, 255, 255, min(alpha, 35))
-        )
-
-        surface.blit(
-            overlay,
-            (0, 0)
-        )
-
-
-# ---------------------------------------------------------
-# ANIMATION
-# ---------------------------------------------------------
-
-def run_animation(message):
+    intensity = 1.0
 
     running = True
 
-    start_time = pygame.time.get_ticks()
-
     while running:
 
-        dt = clock.tick(60) / 1000.0
-
-        current_time = pygame.time.get_ticks()
-
-        t = (current_time - start_time) / 1000.0
+        dt = clock.tick(FPS) / 1000.0
 
         for event in pygame.event.get():
 
@@ -494,118 +589,401 @@ def run_animation(message):
                 elif event.key == pygame.K_r:
                     running = False
 
-        # Black background
-        screen.fill(BLACK)
+                elif event.key == pygame.K_SPACE:
+                    paused = not paused
 
-        # Update particles
-        for particle in particles:
-            particle.update(dt)
-            particle.draw(screen)
+                elif event.key == pygame.K_UP:
+                    intensity = clamp(
+                        intensity + 0.1,
+                        0.4,
+                        2.5
+                    )
 
-        # Update streaks
-        for streak in streaks:
-            streak.update(dt)
-            streak.draw(screen)
+                elif event.key == pygame.K_DOWN:
+                    intensity = clamp(
+                        intensity - 0.1,
+                        0.4,
+                        2.5
+                    )
 
-        # Energy rings
-        draw_energy_rings(
-            screen,
-            t
-        )
+                elif event.key == pygame.K_RIGHT:
+                    speed = clamp(
+                        speed + 0.1,
+                        0.3,
+                        3.0
+                    )
 
-        # Dynamic center movement
-        cx = (
-            WINDOW_WIDTH / 2
-            + math.sin(t * 0.8) * WINDOW_WIDTH * 0.025
-        )
+                elif event.key == pygame.K_LEFT:
+                    speed = clamp(
+                        speed - 0.1,
+                        0.3,
+                        3.0
+                    )
 
-        cy = (
-            WINDOW_HEIGHT / 2
-            + math.cos(t * 0.65) * WINDOW_HEIGHT * 0.025
-        )
+        if not paused:
 
-        # Constant color cycling
-        hue = t * 75
+            elapsed = (
+                pygame.time.get_ticks()
+                - start_ticks
+            ) / 1000.0
 
-        # Subtle rotation
-        rotation = math.sin(t * 1.7) * 1.5
+            t = elapsed * speed
 
-        # Text
-        draw_glowing_text(
-            screen,
-            message,
-            (cx, cy),
-            max(
-                60,
-                int(min(WINDOW_WIDTH, WINDOW_HEIGHT) * 0.105)
-            ),
-            hue,
-            t * 2.8,
-            rotation
-        )
+            # ---------------------------------------------
+            # Background
+            # ---------------------------------------------
 
-        # Flash
-        draw_flash(
-            screen,
-            t
-        )
+            screen = pygame.display.get_surface()
 
-        # Small corner information
-        small_font = pygame.font.Font(
-            BASE_FONT,
-            18
-        )
+            screen.fill(BLACK)
 
-        hint = small_font.render(
-            "ESC  EXIT    •    R  NEW MESSAGE",
-            True,
-            (90, 90, 90)
-        )
+            # ---------------------------------------------
+            # Subtle animated radial glow
+            # ---------------------------------------------
 
-        screen.blit(
-            hint,
-            (
-                WINDOW_WIDTH - hint.get_width() - 25,
-                WINDOW_HEIGHT - hint.get_height() - 20
+            glow_surface = pygame.Surface(
+                (SCREEN_W, SCREEN_H),
+                pygame.SRCALPHA
             )
-        )
 
-        pygame.display.flip()
+            cx = SCREEN_W // 2
+            cy = SCREEN_H // 2
+
+            for radius in range(
+                int(min(SCREEN_W, SCREEN_H) * 0.55),
+                20,
+                -45
+            ):
+
+                alpha = int(
+                    2
+                    + 8
+                    * (
+                        radius
+                        / min(
+                            SCREEN_W,
+                            SCREEN_H
+                        )
+                    )
+                )
+
+                color = hsv_to_rgb(
+                    t * 35
+                    + radius * 0.2,
+                    1,
+                    1
+                )
+
+                pygame.draw.circle(
+                    glow_surface,
+                    (
+                        color[0],
+                        color[1],
+                        color[2],
+                        alpha
+                    ),
+                    (cx, cy),
+                    radius
+                )
+
+            screen.blit(
+                glow_surface,
+                (0, 0)
+            )
+
+            # ---------------------------------------------
+            # Particles
+            # ---------------------------------------------
+
+            for particle in particles:
+                particle.update(
+                    dt,
+                    speed
+                )
+                particle.draw(screen)
+
+            # ---------------------------------------------
+            # Light streaks
+            # ---------------------------------------------
+
+            for streak in streaks:
+                streak.update(
+                    dt,
+                    speed
+                )
+                streak.draw(screen)
+
+            # ---------------------------------------------
+            # Rings
+            # ---------------------------------------------
+
+            draw_energy_rings(
+                screen,
+                t,
+                intensity
+            )
+
+            # ---------------------------------------------
+            # Cinematic camera movement
+            # ---------------------------------------------
+
+            shake_amount = (
+                math.sin(t * 6.0)
+                * 5.0
+                * intensity
+            )
+
+            center_x = (
+                SCREEN_W / 2
+                + math.sin(t * 0.55)
+                * SCREEN_W
+                * 0.018
+                + shake_amount
+            )
+
+            center_y = (
+                SCREEN_H / 2
+                + math.cos(t * 0.47)
+                * SCREEN_H
+                * 0.014
+            )
+
+            # ---------------------------------------------
+            # Intro zoom
+            # ---------------------------------------------
+
+            cycle = elapsed % 9.0
+
+            if cycle < 1.8:
+
+                progress = cycle / 1.8
+
+                zoom = (
+                    0.08
+                    + ease_out_back(progress)
+                    * 0.92
+                )
+
+            else:
+
+                zoom = (
+                    1.0
+                    + math.sin(
+                        t * 2.4
+                    ) * 0.035
+                )
+
+            # ---------------------------------------------
+            # Periodic explosion
+            # ---------------------------------------------
+
+            if (
+                cycle < 0.08
+                and not bursts
+            ):
+                bursts.append(
+                    Burst(
+                        SCREEN_W,
+                        SCREEN_H
+                    )
+                )
+
+            if cycle > 0.15:
+                # Allow another burst next cycle
+                if len(bursts) > 0:
+                    bursts = [
+                        b for b in bursts
+                        if b.update(dt)
+                    ]
+
+            for burst in bursts:
+                burst.draw(screen)
+
+            # ---------------------------------------------
+            # Dynamic hue
+            # ---------------------------------------------
+
+            hue = (
+                t * 85
+                + math.sin(t * 0.4) * 45
+            )
+
+            # ---------------------------------------------
+            # Text
+            # ---------------------------------------------
+
+            base_size = int(
+                min(
+                    SCREEN_W,
+                    SCREEN_H
+                ) * 0.105
+            )
+
+            draw_text_with_glow(
+                screen,
+                message,
+                center_x,
+                center_y,
+                base_size,
+                hue,
+                zoom,
+                math.sin(t * 1.5) * 1.4,
+                t
+            )
+
+            # ---------------------------------------------
+            # Cinematic flash
+            # ---------------------------------------------
+
+            flash_phase = (
+                math.sin(t * math.pi * 0.85)
+                ** 30
+            )
+
+            if flash_phase > 0.35:
+
+                alpha = int(
+                    clamp(
+                        flash_phase * 38
+                        * intensity,
+                        0,
+                        42
+                    )
+                )
+
+                flash = pygame.Surface(
+                    (SCREEN_W, SCREEN_H),
+                    pygame.SRCALPHA
+                )
+
+                flash.fill(
+                    (
+                        255,
+                        255,
+                        255,
+                        alpha
+                    )
+                )
+
+                screen.blit(
+                    flash,
+                    (0, 0)
+                )
+
+            # ---------------------------------------------
+            # HUD
+            # ---------------------------------------------
+
+            hud_font = pygame.font.Font(
+                FONT_PATH,
+                17
+            )
+
+            hud = hud_font.render(
+                "ESC EXIT   R NEW MESSAGE   "
+                "SPACE PAUSE   ← → SPEED   ↑ ↓ INTENSITY",
+                True,
+                (75, 75, 75)
+            )
+
+            screen.blit(
+                hud,
+                (
+                    20,
+                    SCREEN_H
+                    - hud.get_height()
+                    - 15
+                )
+            )
+
+            pygame.display.flip()
+
+        else:
+
+            # Pause screen
+            overlay = pygame.Surface(
+                (SCREEN_W, SCREEN_H),
+                pygame.SRCALPHA
+            )
+
+            overlay.fill(
+                (0, 0, 0, 150)
+            )
+
+            screen = pygame.display.get_surface()
+
+            screen.blit(
+                overlay,
+                (0, 0)
+            )
+
+            pause_font = pygame.font.Font(
+                FONT_PATH,
+                50
+            )
+
+            pause_text = pause_font.render(
+                "PAUSED",
+                True,
+                WHITE
+            )
+
+            rect = pause_text.get_rect(
+                center=(
+                    SCREEN_W // 2,
+                    SCREEN_H // 2
+                )
+            )
+
+            screen.blit(
+                pause_text,
+                rect
+            )
+
+            pygame.display.flip()
 
 
-# ---------------------------------------------------------
-# MESSAGE INPUT SCREEN
-# ---------------------------------------------------------
+# =========================================================
+# INPUT WINDOW
+# =========================================================
 
-def message_screen():
+def input_screen():
 
-    pygame.display.set_mode(
-        (
-            min(WINDOW_WIDTH, 1200),
-            min(WINDOW_HEIGHT, 800)
-        )
+    width = min(
+        SCREEN_W,
+        1250
     )
 
-    input_width = 850
-    input_height = 180
+    height = min(
+        SCREEN_H,
+        820
+    )
+
+    pygame.display.set_mode(
+        (width, height),
+        pygame.RESIZABLE
+    )
 
     window = pygame.display.get_surface()
 
-    width, height = window.get_size()
-
-    font_title = pygame.font.Font(
-        BASE_FONT,
-        42
+    title_font = pygame.font.Font(
+        FONT_PATH,
+        48
     )
 
-    font_input = pygame.font.Font(
-        BASE_FONT,
-        30
+    subtitle_font = pygame.font.Font(
+        FONT_PATH,
+        25
     )
 
-    font_button = pygame.font.Font(
-        BASE_FONT,
+    input_font = pygame.font.Font(
+        FONT_PATH,
         28
+    )
+
+    button_font = pygame.font.Font(
+        FONT_PATH,
+        25
     )
 
     message = ""
@@ -614,7 +992,11 @@ def message_screen():
 
     while running:
 
-        dt = clock.tick(60) / 1000.0
+        dt = clock.tick(FPS) / 1000.0
+
+        width, height = window.get_size()
+
+        t = pygame.time.get_ticks() / 1000.0
 
         for event in pygame.event.get():
 
@@ -622,6 +1004,15 @@ def message_screen():
 
                 pygame.quit()
                 sys.exit()
+
+            if event.type == pygame.VIDEORESIZE:
+
+                width, height = event.w, event.h
+
+                window = pygame.display.set_mode(
+                    (width, height),
+                    pygame.RESIZABLE
+                )
 
             if event.type == pygame.KEYDOWN:
 
@@ -641,7 +1032,11 @@ def message_screen():
 
                 else:
 
-                    if event.unicode and len(message) < 5000:
+                    if (
+                        event.unicode
+                        and len(message)
+                        < MAX_MESSAGE_LENGTH
+                    ):
                         message += event.unicode
 
             if event.type == pygame.MOUSEBUTTONDOWN:
@@ -649,38 +1044,51 @@ def message_screen():
                 mx, my = event.pos
 
                 button_rect = pygame.Rect(
-                    width // 2 - 150,
-                    height // 2 + 130,
-                    300,
-                    65
+                    width // 2 - 190,
+                    height - 145,
+                    380,
+                    70
                 )
 
-                if button_rect.collidepoint(mx, my):
+                if button_rect.collidepoint(
+                    mx,
+                    my
+                ):
 
                     if message.strip():
                         return message.strip()
 
         window.fill(
-            (5, 5, 8)
+            (3, 3, 7)
         )
 
-        # Animated background dots
-        t = pygame.time.get_ticks() / 1000.0
+        # ---------------------------------------------
+        # Animated background
+        # ---------------------------------------------
 
-        for i in range(35):
+        for i in range(70):
+
+            angle = (
+                t * 0.12
+                + i * math.tau / 70
+            )
+
+            radius_x = width * 0.46
+            radius_y = height * 0.42
 
             x = (
                 width / 2
-                + math.cos(t * 0.3 + i) * width * 0.45
+                + math.cos(angle) * radius_x
             )
 
             y = (
                 height / 2
-                + math.sin(t * 0.5 + i * 2) * height * 0.45
+                + math.sin(angle * 1.13)
+                * radius_y
             )
 
             color = hsv_to_rgb(
-                t * 60 + i * 12,
+                t * 65 + i * 7,
                 1,
                 1
             )
@@ -692,20 +1100,24 @@ def message_screen():
                 2
             )
 
+        # ---------------------------------------------
+        # Title
+        # ---------------------------------------------
+
         title_color = hsv_to_rgb(
-            t * 70,
+            t * 80,
             1,
             1
         )
 
-        title = font_title.render(
+        title = title_font.render(
             "EXTREME MESSAGE ANIMATOR",
             True,
             title_color
         )
 
         title_rect = title.get_rect(
-            center=(width // 2, 120)
+            center=(width // 2, 100)
         )
 
         window.blit(
@@ -713,14 +1125,14 @@ def message_screen():
             title_rect
         )
 
-        subtitle = font_input.render(
-            "Enter your message",
+        subtitle = subtitle_font.render(
+            "Turn any message into a cinematic fullscreen animation",
             True,
-            WHITE
+            (210, 210, 220)
         )
 
         subtitle_rect = subtitle.get_rect(
-            center=(width // 2, 205)
+            center=(width // 2, 165)
         )
 
         window.blit(
@@ -728,22 +1140,33 @@ def message_screen():
             subtitle_rect
         )
 
-        input_rect = pygame.Rect(
-            width // 2 - input_width // 2,
-            height // 2 - input_height // 2,
-            input_width,
-            input_height
+        # ---------------------------------------------
+        # Input box
+        # ---------------------------------------------
+
+        box_width = min(
+            width - 80,
+            950
+        )
+
+        box_height = 210
+
+        box = pygame.Rect(
+            width // 2 - box_width // 2,
+            height // 2 - 125,
+            box_width,
+            box_height
         )
 
         pygame.draw.rect(
             window,
-            (15, 15, 20),
-            input_rect,
-            border_radius=18
+            (12, 12, 18),
+            box,
+            border_radius=20
         )
 
         border_color = hsv_to_rgb(
-            t * 80,
+            t * 75,
             1,
             1
         )
@@ -751,71 +1174,98 @@ def message_screen():
         pygame.draw.rect(
             window,
             border_color,
-            input_rect,
-            width=3,
-            border_radius=18
+            box,
+            3,
+            border_radius=20
         )
 
-        display_message = message
+        if message:
 
-        if not display_message:
-            display_message = "Type something amazing..."
+            lines = wrap_text(
+                message,
+                input_font,
+                box.width - 40
+            )
 
-        text_color = (
-            (110, 110, 120)
-            if not message
-            else WHITE
-        )
+            visible_lines = lines[-5:]
 
-        # Wrap input preview
-        lines = wrap_text(
-            display_message,
-            font_input,
-            input_width - 40
-        )
+            y = box.y + 22
 
-        y = input_rect.y + 25
+            for line in visible_lines:
 
-        for line in lines[-4:]:
+                rendered = input_font.render(
+                    line,
+                    True,
+                    WHITE
+                )
 
-            rendered = font_input.render(
-                line,
+                window.blit(
+                    rendered,
+                    (
+                        box.x + 20,
+                        y
+                    )
+                )
+
+                y += input_font.get_linesize()
+
+        else:
+
+            placeholder = input_font.render(
+                "Type your message here...",
                 True,
-                text_color
+                (90, 90, 100)
             )
 
             window.blit(
-                rendered,
+                placeholder,
                 (
-                    input_rect.x + 20,
-                    y
+                    box.x + 20,
+                    box.y + 25
                 )
             )
 
-            y += 38
+        # Character count
+        count = subtitle_font.render(
+            f"{len(message)} / {MAX_MESSAGE_LENGTH}",
+            True,
+            (100, 100, 110)
+        )
 
-        button_rect = pygame.Rect(
-            width // 2 - 150,
-            height // 2 + 130,
-            300,
-            65
+        window.blit(
+            count,
+            (
+                box.right - count.get_width() - 18,
+                box.bottom - count.get_height() - 12
+            )
+        )
+
+        # ---------------------------------------------
+        # Start button
+        # ---------------------------------------------
+
+        button = pygame.Rect(
+            width // 2 - 190,
+            height - 145,
+            380,
+            70
         )
 
         pygame.draw.rect(
             window,
             border_color,
-            button_rect,
-            border_radius=16
+            button,
+            border_radius=18
         )
 
-        button_text = font_button.render(
+        button_text = button_font.render(
             "START ANIMATION",
             True,
             BLACK
         )
 
         button_text_rect = button_text.get_rect(
-            center=button_rect.center
+            center=button.center
         )
 
         window.blit(
@@ -824,16 +1274,19 @@ def message_screen():
         )
 
         hint = pygame.font.Font(
-            BASE_FONT,
+            FONT_PATH,
             18
         ).render(
-            "Press ENTER to start",
+            "Press ENTER to start • ESC to exit",
             True,
-            (120, 120, 120)
+            (100, 100, 110)
         )
 
         hint_rect = hint.get_rect(
-            center=(width // 2, height - 40)
+            center=(
+                width // 2,
+                height - 40
+            )
         )
 
         window.blit(
@@ -844,29 +1297,27 @@ def message_screen():
         pygame.display.flip()
 
 
-# ---------------------------------------------------------
+# =========================================================
 # MAIN
-# ---------------------------------------------------------
+# =========================================================
 
 def main():
 
     while True:
 
-        message = message_screen()
+        message = input_screen()
 
-        # Restore true fullscreen
-        pygame.display.set_mode(
-            (
-                WINDOW_WIDTH,
-                WINDOW_HEIGHT
-            ),
-            pygame.FULLSCREEN | pygame.DOUBLEBUF
-        )
-
-        run_animation(
+        animation_screen(
             message
         )
 
 
 if __name__ == "__main__":
-    main()
+
+    try:
+        main()
+
+    except KeyboardInterrupt:
+
+        pygame.quit()
+        sys.exit(0)
