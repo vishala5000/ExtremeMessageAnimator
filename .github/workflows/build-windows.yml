@@ -1,4 +1,4 @@
-name: Build Windows 7 and 10
+name: Build Windows 7 and Windows 10
 
 on:
   workflow_dispatch:
@@ -10,187 +10,370 @@ jobs:
 
   build:
 
-    name: Legacy Windows Build
+    name: Legacy Windows 7/10 Build
 
     runs-on: windows-2022
 
     steps:
 
-      # --------------------------------------------------
-      # SOURCE
-      # --------------------------------------------------
+      # ==================================================
+      # CHECKOUT
+      # ==================================================
 
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # --------------------------------------------------
-      # PYTHON 3.8
-      # --------------------------------------------------
 
-      - name: Setup Python 3.8
+      # ==================================================
+      # PYTHON 3.8
+      # ==================================================
+
+      - name: Setup Python 3.8.10
         uses: actions/setup-python@v5
         with:
           python-version: "3.8.10"
+          architecture: "x64"
 
-      # --------------------------------------------------
-      # VERIFY PYTHON
-      # --------------------------------------------------
 
-      - name: Show Python version
+      # ==================================================
+      # PYTHON INFORMATION
+      # ==================================================
+
+      - name: Show Python
         shell: cmd
         run: |
           python --version
+          python -c "import platform; print(platform.architecture())"
           python -c "import sys; print(sys.version)"
 
-      # --------------------------------------------------
-      # INSTALL
-      # --------------------------------------------------
 
-      - name: Upgrade pip
+      # ==================================================
+      # PIP
+      # ==================================================
+
+      - name: Install legacy pip
         shell: cmd
         run: |
           python -m pip install --upgrade "pip<24.1"
 
-      - name: Install dependencies
+
+      # ==================================================
+      # DEPENDENCIES
+      # ==================================================
+
+      - name: Install Pygame
         shell: cmd
         run: |
           python -m pip install pygame==2.1.3
+
+
+      - name: Install PyInstaller
+        shell: cmd
+        run: |
           python -m pip install pyinstaller==5.13.2
 
-      # --------------------------------------------------
-      # VERIFY PYGAME
-      # --------------------------------------------------
 
-      - name: Test pygame
+      # ==================================================
+      # TEST PYGAME
+      # ==================================================
+
+      - name: Verify Pygame
         shell: cmd
         run: |
-          python -c "import pygame; print('pygame:', pygame.version.ver)"
+          python -c "import pygame; print('Pygame:', pygame.version.ver)"
 
-      # --------------------------------------------------
+
+      # ==================================================
+      # CLEAN
+      # ==================================================
+
+      - name: Clean previous build
+        shell: powershell
+        run: |
+
+          if (Test-Path "build") {
+              Remove-Item "build" -Recurse -Force
+          }
+
+          if (Test-Path "dist") {
+              Remove-Item "dist" -Recurse -Force
+          }
+
+          if (Test-Path "installer") {
+              Remove-Item "installer" -Recurse -Force
+          }
+
+          New-Item `
+              -ItemType Directory `
+              -Force `
+              -Path "installer" | Out-Null
+
+
+      # ==================================================
       # BUILD
-      # --------------------------------------------------
+      # ==================================================
 
-      - name: Build application
+      - name: Build EXE
         shell: cmd
         run: |
-          rmdir /s /q build 2>nul || exit /b 0
-          rmdir /s /q dist 2>nul || exit /b 0
-
-          pyinstaller ^
+          python -m PyInstaller ^
             --clean ^
             --noconfirm ^
             ExtremeMessageAnimator.spec
 
-      # --------------------------------------------------
-      # VERIFY
-      # --------------------------------------------------
 
-      - name: Verify EXE
+      # ==================================================
+      # FIND PYTHON RUNTIME
+      # ==================================================
+
+      - name: Locate Python runtime DLLs
         shell: powershell
         run: |
 
-          $exe = "dist\ExtremeMessageAnimator.exe"
+          Write-Host "Searching for Visual C++ runtime files..."
 
-          if (!(Test-Path $exe)) {
-              Write-Error "ExtremeMessageAnimator.exe was not created."
+          $pythonRoot = Split-Path `
+              (Get-Command python).Source
+
+          Write-Host "Python root:"
+          Write-Host $pythonRoot
+
+          $runtimeNames = @(
+              "vcruntime140.dll",
+              "vcruntime140_1.dll"
+          )
+
+          foreach ($name in $runtimeNames) {
+
+              $found = Get-ChildItem `
+                  -Path $pythonRoot `
+                  -Filter $name `
+                  -Recurse `
+                  -ErrorAction SilentlyContinue |
+                  Select-Object -First 1
+
+              if ($found) {
+
+                  Copy-Item `
+                      $found.FullName `
+                      "dist\$name" `
+                      -Force
+
+                  Write-Host "Copied:"
+                  Write-Host $found.FullName
+
+              } else {
+
+                  Write-Warning `
+                      "$name was not found."
+              }
+          }
+
+
+      # ==================================================
+      # LOCATE UNIVERSAL CRT
+      # ==================================================
+
+      - name: Locate Universal CRT
+        shell: powershell
+        run: |
+
+          Write-Host "Searching Windows SDK for ucrtbase.dll..."
+
+          $possibleRoots = @(
+              "C:\Program Files (x86)\Windows Kits\10",
+              "C:\Program Files\Windows Kits\10"
+          )
+
+          $ucrt = $null
+
+          foreach ($root in $possibleRoots) {
+
+              if (Test-Path $root) {
+
+                  $result = Get-ChildItem `
+                      -Path $root `
+                      -Filter "ucrtbase.dll" `
+                      -Recurse `
+                      -ErrorAction SilentlyContinue |
+                      Where-Object {
+                          $_.FullName -match "\\x64\\"
+                      } |
+                      Select-Object -First 1
+
+                  if ($result) {
+
+                      $ucrt = $result
+                      break
+                  }
+              }
+          }
+
+          if ($ucrt) {
+
+              Write-Host "Found:"
+              Write-Host $ucrt.FullName
+
+              Copy-Item `
+                  $ucrt.FullName `
+                  "dist\ucrtbase.dll" `
+                  -Force
+
+          } else {
+
+              Write-Error `
+                  "ucrtbase.dll could not be located."
+
               exit 1
           }
 
-          $file = Get-Item $exe
 
-          Write-Host "--------------------------------------"
-          Write-Host "BUILD SUCCESS"
-          Write-Host "File: $($file.FullName)"
-          Write-Host "Size: $($file.Length) bytes"
-          Write-Host "--------------------------------------"
+      # ==================================================
+      # CHECK DLLS
+      # ==================================================
 
-      # --------------------------------------------------
-      # CREATE INSTALLER DIRECTORY
-      # --------------------------------------------------
-
-      - name: Create installer directory
+      - name: Verify runtime DLLs
         shell: powershell
         run: |
-          New-Item `
-            -ItemType Directory `
-            -Force `
-            -Path installer
 
-      # --------------------------------------------------
-      # INSTALL LEGACY INNO SETUP
-      # --------------------------------------------------
+          Write-Host ""
+          Write-Host "Runtime files:"
+          Write-Host ""
+
+          Get-ChildItem dist
+
+          $required = @(
+              "ExtremeMessageAnimator.exe",
+              "ucrtbase.dll",
+              "vcruntime140.dll"
+          )
+
+          foreach ($file in $required) {
+
+              if (!(Test-Path "dist\$file")) {
+
+                  Write-Error `
+                      "Required file missing: $file"
+
+                  exit 1
+              }
+          }
+
+          Write-Host ""
+          Write-Host "All required runtime files are present."
+
+
+      # ==================================================
+      # INSTALL INNO SETUP
+      # ==================================================
 
       - name: Install Inno Setup
         shell: powershell
         run: |
 
           choco install innosetup `
-            --version=6.2.2 `
-            --no-progress `
-            -y
+              --version=6.2.2 `
+              --no-progress `
+              -y
 
-      # --------------------------------------------------
+
+      # ==================================================
       # BUILD INSTALLER
-      # --------------------------------------------------
+      # ==================================================
 
       - name: Build installer
         shell: powershell
         run: |
 
-          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $iscc = `
+              "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 
           if (!(Test-Path $iscc)) {
-              Write-Error "Inno Setup compiler was not found."
+
+              Write-Error `
+                  "Inno Setup compiler not found."
+
               exit 1
           }
 
           & $iscc "installer.iss"
 
           if ($LASTEXITCODE -ne 0) {
-              Write-Error "Inno Setup failed."
+
+              Write-Error `
+                  "Inno Setup build failed."
+
               exit 1
           }
 
-      # --------------------------------------------------
-      # VERIFY INSTALLER
-      # --------------------------------------------------
 
-      - name: Verify installer
+      # ==================================================
+      # VERIFY INSTALLER
+      # ==================================================
+
+      - name: Verify final files
         shell: powershell
         run: |
 
-          $installer = `
-            "installer\ExtremeMessageAnimator-Windows7-10-Setup.exe"
+          $exe = `
+              "dist\ExtremeMessageAnimator.exe"
 
-          if (!(Test-Path $installer)) {
-              Write-Error "Installer was not created."
+          $installer = `
+              "installer\ExtremeMessageAnimator-Windows7-10-Setup.exe"
+
+          if (!(Test-Path $exe)) {
+
+              Write-Error `
+                  "EXE missing."
+
               exit 1
           }
 
-          $file = Get-Item $installer
+          if (!(Test-Path $installer)) {
 
-          Write-Host "--------------------------------------"
-          Write-Host "INSTALLER SUCCESS"
-          Write-Host "File: $($file.FullName)"
-          Write-Host "Size: $($file.Length) bytes"
-          Write-Host "--------------------------------------"
+              Write-Error `
+                  "Installer missing."
 
-      # --------------------------------------------------
+              exit 1
+          }
+
+          Write-Host ""
+          Write-Host "======================================"
+          Write-Host "BUILD SUCCESS"
+          Write-Host "======================================"
+          Write-Host ""
+
+          Get-Item $exe
+          Get-Item $installer
+
+          Write-Host ""
+          Write-Host "Runtime DLLs:"
+          Write-Host ""
+
+          Get-ChildItem dist -Filter "*.dll"
+
+
+      # ==================================================
       # UPLOAD EXE
-      # --------------------------------------------------
+      # ==================================================
 
-      - name: Upload EXE
+      - name: Upload portable EXE
         uses: actions/upload-artifact@v4
         with:
-          name: ExtremeMessageAnimator-Windows7-10-EXE
-          path: dist/ExtremeMessageAnimator.exe
+          name: ExtremeMessageAnimator-Windows7-10-Portable
+          path: |
+            dist/ExtremeMessageAnimator.exe
+            dist/ucrtbase.dll
+            dist/vcruntime140.dll
+            dist/vcruntime140_1.dll
           if-no-files-found: error
 
-      # --------------------------------------------------
-      # UPLOAD INSTALLER
-      # --------------------------------------------------
 
-      - name: Upload Installer
+      # ==================================================
+      # UPLOAD INSTALLER
+      # ==================================================
+
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: ExtremeMessageAnimator-Windows7-10-Installer
