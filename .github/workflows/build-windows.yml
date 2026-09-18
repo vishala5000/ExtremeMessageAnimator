@@ -1,4 +1,4 @@
-name: Build Windows 7 and Windows 10
+name: Build Extreme Message Animator
 
 on:
   workflow_dispatch:
@@ -7,375 +7,530 @@ permissions:
   contents: read
 
 jobs:
-
-  build:
-
-    name: Legacy Windows 7/10 Build
-
+  build-windows:
+    name: Build Windows 7/10 EXE and Installer
     runs-on: windows-2022
 
     steps:
-
-      # ==================================================
+      # ============================================================
       # CHECKOUT
-      # ==================================================
-
-      - name: Checkout repository
+      # ============================================================
+      - name: Checkout source
         uses: actions/checkout@v4
 
-
-      # ==================================================
-      # PYTHON 3.8
-      # ==================================================
-
+      # ============================================================
+      # PYTHON 3.8.10
+      # Windows 7 compatible target
+      # ============================================================
       - name: Setup Python 3.8.10
         uses: actions/setup-python@v5
         with:
           python-version: "3.8.10"
-          architecture: "x64"
+          architecture: x64
+          cache: pip
 
-
-      # ==================================================
-      # PYTHON INFORMATION
-      # ==================================================
-
-      - name: Show Python
-        shell: cmd
+      # ============================================================
+      # SHOW ENVIRONMENT
+      # ============================================================
+      - name: Show build environment
+        shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=========================================="
+          Write-Host "BUILD ENVIRONMENT"
+          Write-Host "=========================================="
+
           python --version
-          python -c "import platform; print(platform.architecture())"
-          python -c "import sys; print(sys.version)"
+          python -c "import platform; print(platform.platform()); print(platform.machine())"
 
+          Write-Host ""
+          Write-Host "Python location:"
+          where.exe python
 
-      # ==================================================
-      # PIP
-      # ==================================================
+          Write-Host ""
+          Write-Host "PowerShell:"
+          $PSVersionTable.PSVersion
 
-      - name: Install legacy pip
-        shell: cmd
+      # ============================================================
+      # INSTALL PYTHON BUILD TOOLS
+      # ============================================================
+      - name: Install Python dependencies
+        shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
+
           python -m pip install --upgrade "pip<24.1"
+          python -m pip install --no-cache-dir pygame==2.1.3
+          python -m pip install --no-cache-dir pyinstaller==5.13.2
 
-
-      # ==================================================
-      # DEPENDENCIES
-      # ==================================================
-
-      - name: Install Pygame
-        shell: cmd
-        run: |
-          python -m pip install pygame==2.1.3
-
-
-      - name: Install PyInstaller
-        shell: cmd
-        run: |
-          python -m pip install pyinstaller==5.13.2
-
-
-      # ==================================================
-      # TEST PYGAME
-      # ==================================================
-
+      # ============================================================
+      # VERIFY PYGAME
+      # ============================================================
       - name: Verify Pygame
-        shell: cmd
+        shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
+
           python -c "import pygame; print('Pygame:', pygame.version.ver)"
+          python -c "import pygame; pygame.init(); print('Pygame initialized successfully'); pygame.quit()"
 
-
-      # ==================================================
-      # CLEAN
-      # ==================================================
-
-      - name: Clean previous build
+      # ============================================================
+      # VERIFY PYINSTALLER
+      # ============================================================
+      - name: Verify PyInstaller
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
 
-          if (Test-Path "build") {
-              Remove-Item "build" -Recurse -Force
-          }
+          python -m PyInstaller --version
 
-          if (Test-Path "dist") {
-              Remove-Item "dist" -Recurse -Force
-          }
-
-          if (Test-Path "installer") {
-              Remove-Item "installer" -Recurse -Force
-          }
-
-          New-Item `
-              -ItemType Directory `
-              -Force `
-              -Path "installer" | Out-Null
-
-
-      # ==================================================
-      # BUILD
-      # ==================================================
-
-      - name: Build EXE
-        shell: cmd
-        run: |
-          python -m PyInstaller ^
-            --clean ^
-            --noconfirm ^
-            ExtremeMessageAnimator.spec
-
-
-      # ==================================================
-      # FIND PYTHON RUNTIME
-      # ==================================================
-
-      - name: Locate Python runtime DLLs
+      # ============================================================
+      # CLEAN OLD BUILD FILES
+      # ============================================================
+      - name: Clean build directories
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
 
-          Write-Host "Searching for Visual C++ runtime files..."
-
-          $pythonRoot = Split-Path `
-              (Get-Command python).Source
-
-          Write-Host "Python root:"
-          Write-Host $pythonRoot
-
-          $runtimeNames = @(
-              "vcruntime140.dll",
-              "vcruntime140_1.dll"
+          $folders = @(
+            "build",
+            "dist",
+            "installer",
+            "Output"
           )
 
-          foreach ($name in $runtimeNames) {
+          foreach ($folder in $folders) {
+            if (Test-Path $folder) {
+              Remove-Item $folder -Recurse -Force
+            }
+          }
+
+          Write-Host "Build directories cleaned."
+
+      # ============================================================
+      # BUILD EXE
+      # ============================================================
+      - name: Build application with PyInstaller
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (-not (Test-Path "app.py")) {
+            throw "app.py was not found."
+          }
+
+          if (-not (Test-Path "ExtremeMessageAnimator.spec")) {
+            throw "ExtremeMessageAnimator.spec was not found."
+          }
+
+          Write-Host "=========================================="
+          Write-Host "BUILDING EXTREME MESSAGE ANIMATOR"
+          Write-Host "=========================================="
+
+          python -m PyInstaller `
+            --clean `
+            --noconfirm `
+            "ExtremeMessageAnimator.spec"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "PyInstaller build failed with exit code $LASTEXITCODE"
+          }
+
+      # ============================================================
+      # CHECK EXE
+      # ============================================================
+      - name: Verify EXE
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $exe = "dist\ExtremeMessageAnimator.exe"
+
+          if (-not (Test-Path $exe)) {
+            throw "ExtremeMessageAnimator.exe was not created."
+          }
+
+          $size = (Get-Item $exe).Length
+
+          Write-Host "=========================================="
+          Write-Host "EXE CREATED"
+          Write-Host "=========================================="
+          Write-Host "Path: $exe"
+          Write-Host "Size: $size bytes"
+
+          if ($size -lt 1000000) {
+            Write-Warning "EXE is unusually small."
+          }
+
+      # ============================================================
+      # COPY WINDOWS RUNTIME DLLS
+      # ============================================================
+      - name: Add Windows runtime DLLs
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $dist = Join-Path $PWD "dist"
+
+          if (-not (Test-Path $dist)) {
+            throw "dist directory does not exist."
+          }
+
+          Write-Host "=========================================="
+          Write-Host "ADDING WINDOWS RUNTIME FILES"
+          Write-Host "=========================================="
+
+          # --------------------------------------------------------
+          # Visual C++ Runtime
+          # --------------------------------------------------------
+          $pythonRoot = $env:pythonLocation
+
+          $runtimeFiles = @(
+            "vcruntime140.dll",
+            "vcruntime140_1.dll"
+          )
+
+          foreach ($file in $runtimeFiles) {
+
+            $source = Join-Path $pythonRoot $file
+            $destination = Join-Path $dist $file
+
+            if (Test-Path $source) {
+              Copy-Item $source $destination -Force
+              Write-Host "Copied $file"
+            }
+            else {
+              Write-Warning "$file not found at $source"
+            }
+          }
+
+          # --------------------------------------------------------
+          # Universal CRT
+          # --------------------------------------------------------
+          $ucrtCandidates = @()
+
+          $windowsKits = @(
+            "${env:ProgramFiles(x86)}\Windows Kits\10\Redist",
+            "${env:ProgramFiles}\Windows Kits\10\Redist"
+          )
+
+          foreach ($kitRoot in $windowsKits) {
+
+            if (Test-Path $kitRoot) {
 
               $found = Get-ChildItem `
-                  -Path $pythonRoot `
-                  -Filter $name `
-                  -Recurse `
-                  -ErrorAction SilentlyContinue |
-                  Select-Object -First 1
+                -Path $kitRoot `
+                -Filter "ucrtbase.dll" `
+                -File `
+                -Recurse `
+                -ErrorAction SilentlyContinue
 
               if ($found) {
-
-                  Copy-Item `
-                      $found.FullName `
-                      "dist\$name" `
-                      -Force
-
-                  Write-Host "Copied:"
-                  Write-Host $found.FullName
-
-              } else {
-
-                  Write-Warning `
-                      "$name was not found."
+                $ucrtCandidates += $found
               }
+            }
           }
 
+          $ucrt = $ucrtCandidates |
+            Where-Object {
+              $_.FullName -match "x64"
+            } |
+            Select-Object -First 1
 
-      # ==================================================
-      # LOCATE UNIVERSAL CRT
-      # ==================================================
-
-      - name: Locate Universal CRT
-        shell: powershell
-        run: |
-
-          Write-Host "Searching Windows SDK for ucrtbase.dll..."
-
-          $possibleRoots = @(
-              "C:\Program Files (x86)\Windows Kits\10",
-              "C:\Program Files\Windows Kits\10"
-          )
-
-          $ucrt = $null
-
-          foreach ($root in $possibleRoots) {
-
-              if (Test-Path $root) {
-
-                  $result = Get-ChildItem `
-                      -Path $root `
-                      -Filter "ucrtbase.dll" `
-                      -Recurse `
-                      -ErrorAction SilentlyContinue |
-                      Where-Object {
-                          $_.FullName -match "\\x64\\"
-                      } |
-                      Select-Object -First 1
-
-                  if ($result) {
-
-                      $ucrt = $result
-                      break
-                  }
-              }
+          if (-not $ucrt) {
+            $ucrt = $ucrtCandidates | Select-Object -First 1
           }
 
           if ($ucrt) {
 
-              Write-Host "Found:"
-              Write-Host $ucrt.FullName
+            Copy-Item `
+              $ucrt.FullName `
+              (Join-Path $dist "ucrtbase.dll") `
+              -Force
 
-              Copy-Item `
-                  $ucrt.FullName `
-                  "dist\ucrtbase.dll" `
-                  -Force
-
-          } else {
-
-              Write-Error `
-                  "ucrtbase.dll could not be located."
-
-              exit 1
+            Write-Host "Copied ucrtbase.dll from:"
+            Write-Host $ucrt.FullName
+          }
+          else {
+            Write-Warning "ucrtbase.dll was not found."
           }
 
+          Write-Host ""
+          Write-Host "Runtime files in dist:"
+          Get-ChildItem $dist |
+            Where-Object {
+              $_.Name -match "^(ucrtbase|vcruntime).*\.dll$"
+            } |
+            Select-Object Name, Length
 
-      # ==================================================
-      # CHECK DLLS
-      # ==================================================
-
-      - name: Verify runtime DLLs
+      # ============================================================
+      # VERIFY RUNTIME FILES
+      # ============================================================
+      - name: Verify Windows runtime files
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
 
-          Write-Host ""
-          Write-Host "Runtime files:"
-          Write-Host ""
-
-          Get-ChildItem dist
+          $dist = "dist"
 
           $required = @(
-              "ExtremeMessageAnimator.exe",
-              "ucrtbase.dll",
-              "vcruntime140.dll"
+            "ExtremeMessageAnimator.exe"
           )
 
           foreach ($file in $required) {
+            if (-not (Test-Path (Join-Path $dist $file))) {
+              throw "$file is missing."
+            }
+          }
 
-              if (!(Test-Path "dist\$file")) {
+          Write-Host "Application files verified."
 
-                  Write-Error `
-                      "Required file missing: $file"
+          $runtime = @(
+            "ucrtbase.dll",
+            "vcruntime140.dll",
+            "vcruntime140_1.dll"
+          )
 
-                  exit 1
+          foreach ($file in $runtime) {
+
+            $path = Join-Path $dist $file
+
+            if (Test-Path $path) {
+              Write-Host "FOUND: $file"
+            }
+            else {
+              Write-Warning "NOT FOUND: $file"
+            }
+          }
+
+      # ============================================================
+      # FIND PREINSTALLED INNO SETUP
+      #
+      # IMPORTANT:
+      # GitHub's Windows runner already contains a newer
+      # Inno Setup version. Do NOT downgrade it with Chocolatey.
+      # ============================================================
+      - name: Locate Inno Setup
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=========================================="
+          Write-Host "LOCATING INNO SETUP"
+          Write-Host "=========================================="
+
+          $possiblePaths = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          )
+
+          $iscc = $null
+
+          foreach ($path in $possiblePaths) {
+
+            if (Test-Path $path) {
+              $iscc = $path
+              break
+            }
+          }
+
+          # Fallback: search Program Files
+          if (-not $iscc) {
+
+            $searchRoots = @(
+              $env:ProgramFiles,
+              ${env:ProgramFiles(x86)}
+            )
+
+            foreach ($root in $searchRoots) {
+
+              if (-not $root) {
+                continue
               }
+
+              if (Test-Path $root) {
+
+                $found = Get-ChildItem `
+                  -Path $root `
+                  -Filter "ISCC.exe" `
+                  -File `
+                  -Recurse `
+                  -ErrorAction SilentlyContinue |
+                  Select-Object -First 1
+
+                if ($found) {
+                  $iscc = $found.FullName
+                  break
+                }
+              }
+            }
           }
 
-          Write-Host ""
-          Write-Host "All required runtime files are present."
+          if (-not $iscc) {
+            throw "Inno Setup ISCC.exe was not found on the GitHub runner."
+          }
 
+          Write-Host "Inno Setup compiler found:"
+          Write-Host $iscc
 
-      # ==================================================
-      # INSTALL INNO SETUP
-      # ==================================================
+          # Save for later steps
+          "ISCC_PATH=$iscc" >> $env:GITHUB_ENV
 
-      - name: Install Inno Setup
+      # ============================================================
+      # SHOW INNO SETUP VERSION
+      # ============================================================
+      - name: Verify Inno Setup
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
 
-          choco install innosetup `
-              --version=6.2.2 `
-              --no-progress `
-              -y
+          if (-not $env:ISCC_PATH) {
+            throw "ISCC_PATH is not defined."
+          }
 
+          if (-not (Test-Path $env:ISCC_PATH)) {
+            throw "ISCC.exe does not exist at $env:ISCC_PATH"
+          }
 
-      # ==================================================
+          Write-Host "Using:"
+          Write-Host $env:ISCC_PATH
+
+          & $env:ISCC_PATH /?
+
+      # ============================================================
       # BUILD INSTALLER
-      # ==================================================
-
-      - name: Build installer
+      # ============================================================
+      - name: Build Installer
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
 
-          $iscc = `
-              "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-
-          if (!(Test-Path $iscc)) {
-
-              Write-Error `
-                  "Inno Setup compiler not found."
-
-              exit 1
+          if (-not $env:ISCC_PATH) {
+            throw "ISCC_PATH is not available."
           }
 
-          & $iscc "installer.iss"
+          if (-not (Test-Path "installer.iss")) {
+            throw "installer.iss was not found."
+          }
+
+          Write-Host "=========================================="
+          Write-Host "BUILDING INSTALLER"
+          Write-Host "=========================================="
+
+          & $env:ISCC_PATH "installer.iss"
 
           if ($LASTEXITCODE -ne 0) {
-
-              Write-Error `
-                  "Inno Setup build failed."
-
-              exit 1
+            throw "Inno Setup compilation failed with exit code $LASTEXITCODE"
           }
 
-
-      # ==================================================
-      # VERIFY INSTALLER
-      # ==================================================
-
-      - name: Verify final files
+      # ============================================================
+      # FIND INSTALLER
+      # ============================================================
+      - name: Verify installer
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
 
-          $exe = `
-              "dist\ExtremeMessageAnimator.exe"
+          Write-Host "=========================================="
+          Write-Host "SEARCHING FOR INSTALLER"
+          Write-Host "=========================================="
 
-          $installer = `
-              "installer\ExtremeMessageAnimator-Windows7-10-Setup.exe"
+          $installer = Get-ChildItem `
+            -Path $PWD `
+            -Filter "*.exe" `
+            -File `
+            -Recurse |
+            Where-Object {
+              $_.FullName -match "Setup"
+            } |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
 
-          if (!(Test-Path $exe)) {
-
-              Write-Error `
-                  "EXE missing."
-
-              exit 1
+          if (-not $installer) {
+            throw "Installer EXE was not created."
           }
 
-          if (!(Test-Path $installer)) {
+          Write-Host "Installer found:"
+          Write-Host $installer.FullName
 
-              Write-Error `
-                  "Installer missing."
+          Write-Host ""
+          Write-Host "Installer size:"
+          Write-Host "$($installer.Length) bytes"
 
-              exit 1
+          # Put installer into a predictable directory
+          New-Item -ItemType Directory -Force -Path "installer" | Out-Null
+
+          Copy-Item `
+            $installer.FullName `
+            "installer\ExtremeMessageAnimator-Windows7-10-Setup.exe" `
+            -Force
+
+          if (-not (Test-Path "installer\ExtremeMessageAnimator-Windows7-10-Setup.exe")) {
+            throw "Final installer copy failed."
           }
 
           Write-Host ""
-          Write-Host "======================================"
-          Write-Host "BUILD SUCCESS"
-          Write-Host "======================================"
-          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "INSTALLER READY"
+          Write-Host "=========================================="
 
-          Get-Item $exe
-          Get-Item $installer
+      # ============================================================
+      # CREATE PORTABLE PACKAGE
+      # ============================================================
+      - name: Create portable package
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
 
-          Write-Host ""
-          Write-Host "Runtime DLLs:"
-          Write-Host ""
+          if (-not (Test-Path "dist\ExtremeMessageAnimator.exe")) {
+            throw "Portable EXE missing."
+          }
 
-          Get-ChildItem dist -Filter "*.dll"
+          New-Item -ItemType Directory -Force -Path "portable" | Out-Null
 
+          Copy-Item `
+            "dist\ExtremeMessageAnimator.exe" `
+            "portable\ExtremeMessageAnimator.exe" `
+            -Force
 
-      # ==================================================
-      # UPLOAD EXE
-      # ==================================================
+          foreach ($dll in @(
+            "ucrtbase.dll",
+            "vcruntime140.dll",
+            "vcruntime140_1.dll"
+          )) {
 
-      - name: Upload portable EXE
+            $source = "dist\$dll"
+
+            if (Test-Path $source) {
+              Copy-Item `
+                $source `
+                "portable\$dll" `
+                -Force
+            }
+          }
+
+          Write-Host "Portable package:"
+          Get-ChildItem portable
+
+      # ============================================================
+      # UPLOAD PORTABLE EXE
+      # ============================================================
+      - name: Upload portable application
         uses: actions/upload-artifact@v4
         with:
-          name: ExtremeMessageAnimator-Windows7-10-Portable
-          path: |
-            dist/ExtremeMessageAnimator.exe
-            dist/ucrtbase.dll
-            dist/vcruntime140.dll
-            dist/vcruntime140_1.dll
+          name: ExtremeMessageAnimator-Portable-Windows7-10
+          path: portable/
           if-no-files-found: error
+          retention-days: 30
 
-
-      # ==================================================
+      # ============================================================
       # UPLOAD INSTALLER
-      # ==================================================
-
-      - name: Upload installer
+      # ============================================================
+      - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: ExtremeMessageAnimator-Windows7-10-Installer
+          name: ExtremeMessageAnimator-Setup-Windows7-10
           path: installer/ExtremeMessageAnimator-Windows7-10-Setup.exe
           if-no-files-found: error
+          retention-days: 30
